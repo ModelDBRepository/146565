@@ -1,0 +1,566 @@
+
+	load_file("l4sscell.hoc")//the cell
+//	load_file("l4cell2.hoc")//
+//	load_file("l23_3.hoc")//                                                          
+//	load_file("layerV2.hoc")//
+
+
+
+	load_file("nrngui.hoc")
+	//****SYNAPTIC CONDUCTACES
+		//for auto run
+	uplimit=40		//up limit of presynaptic cells
+	downlimit=40	//bottom  limit of presynaptic cells
+	countlimit=2    //counter between bottom to top
+
+	   //activation parameters - netstim for Thalamo-Cortical inputs
+	tcnoise=1		//0-fixed ISI interval, 1-random activation times
+	tcdel=40		//delay to first stim
+	tcNspike=10		//number of presynaptic spikes
+	tcTspike=5		//ISI between spikes (average)
+		//same for Cortico-Cortical (eCC)
+	ccnoise=1		//0
+	ccdel=50		//200
+	ccNspike=3		//5
+	ccTspike=20 	//
+	Inoise=1//0
+		//Inhibitory (iCC)
+	Idel=50			//200
+	INspike=5 		//
+	ITspike=20  	//
+	TCratio=1		//ratio between the number of TC inputs to TC (100%)
+	CCratio=.3      //...CC
+	Inhibratio=.5   //and Inhib inputs
+	TCsyn=1         //number of thalamic cells
+	CCsyn=1         //number of eCC cells
+	Isyn=1          //number of iCC cells
+	tcsynpercell=5	//number of synaptic contacts between thalamic and l4 neuron;based on 	cruikshank et al 2007
+	ccsynpercell=5	//number of synaptic contacts between l4 and l4 neuron;
+	Isynpercell=5   //number of inhibitory synaptic contacts to l4 cell
+
+	percentseg=0	//0-100% segregated on specific branches; 0-completetly random locations
+
+		//background synapses, random
+	randEnum=100 	//Excitatory
+	randInum=100  	//Inhibitory
+	randAMPAmax=.3  //conductances (nS)
+	randNMDAmax=.75 //...
+	randGABAmax=.5  //...
+
+    	//more details of synaptic activation
+    risetime_gaba_net=2  	//GABAA-rise time
+    decaytime_gaba_net=40   //GABAA-decay time
+
+	tau_ampa_glutamate=2    //decay time
+	tau_ampa_glutamate_old=2//decay time (not net stim synapse)
+	tau1_glutamate=50       //decay time
+	tau2_glutamate=2        //rise time
+	gama_glutamate=0.08     //'sharpness' of voltage IV curve
+	n_glutamate=0.25        //'Vhalf' of voltage IV curve
+		//synaptic conductances of single synapses(nS)
+	gampamaxcc=0.3 			//based on sun et al 2006
+	gnmdamaxcc=.75
+	gampamaxtc=.3			//based on 	cruikshank et al 2007
+	gnmdamaxtc=.75
+	ggabamax=0.5 	//conductance (nS)
+	   //short term decay (depression)(to % of first pulse)
+	decaynmdatc=.6
+	decayampatc=.3
+	decaynmdacc=1
+	decayampacc=.5
+ 	decaygaba=.7 			//GABAA-short term depression (to % of first pulse)
+
+	//OBJECTS
+	objref tcinputvectimes[2],ccinputvectimes[2],Iinputvectimes[2]
+ 	objref tcnetstim[2],ccnetstim[2], Inetstim[2]
+	objref temp,temp2
+ 	objref rall, rseg, rbg,rbgnormal,rsyndist,rrandsyn  //random objects
+	rall= new Random()
+	rseg= new Random()
+	rbg= new Random()
+	rbgnormal= new Random()
+	rsyndist=new Random()
+	rrandsyn=new Random()
+	objref savevec,savebaseline ,fsave //saving vectors
+	savevec=new Vector()
+	savebaseline=new Vector()
+			  //some important vectors
+	objref apnum,aplast,upstate,downstate,updur,cavectors[2],Vvectors[2],focV,focAMPA,focNMDA,globV,globAMPA,globNMDA
+	objref gNMDAcc[2],gAMPAcc[2],gNMDAtc[2],gAMPAtc[2],Vcc[2],cacc[2]
+ 	objref  randElist,randIlist
+
+	objref fV,fAP ,backvec
+    objref conTCAMPA[2],conTCNMDA[2],conCCAMPA[2],conCCNMDA[2],conIGABA1[2],conIGABA2[2]
+
+    //*****ACTIVE CONDUCTANCES
+	taus_hh3=30
+	tausv_hh3=10
+	tausn_hh3=5
+	tausb_hh3=0.1
+	taun_hh3=2
+	taun2_hh3=40
+	tauh_hh3=1
+
+	soma_na=0.5//2//.3
+	soma_k1=.1//.03
+	soma_k2=0.1
+	dend_na=0.002
+	dend_k1=0.001
+	dend_k2=0.0001//0.001
+	axon_na=0
+	axon_k1=0
+	axon_k2=0
+	cabar=0.03
+	itbar=0
+	hbar=0.0001
+	//end active conductances
+
+	zeroactive=1
+	nmdaoff=0			//1-NMDA becomes an ohmic conductance with no v dependence
+	nmdaVset=-60        //set voltage of NMDA conductance when nmdaoff=1
+
+	    	//the cell
+	objref cell
+	cell=new l4(0,0)
+	savevec.record(&cell.soma.v(.5))
+
+//****FOCAL SYNAPSE
+	objref synglu
+	synglu=new glutamate_old(0.9)
+	synglu.decaynmda=1
+	synglu.decayampa=.5
+	synglu.del=tcdel+tcTspike*2
+	synglu.Nspike=2
+	synglu.Tspike=tcTspike
+	synglu.gnmdamax=0
+	synglu.gampamax=0
+//end focal syn
+	strdef st
+	forall {nseg=9}
+	proc init_active(){	
+		// voltage gated conductances
+		zero=0
+		if (zeroactive==0){zero=1}
+		access cell.soma
+		insert hh3
+		vshift_hh3=-10
+		gnabar_hh3=soma_na//*(zero)
+		gkbar_hh3=soma_k1//*(zero)
+		gkbar2_hh3=soma_k2//*(zero)
+		forsec cell.all{
+			insert hh3
+			gnabar_hh3=dend_na//*(zero)
+			gkbar_hh3=dend_k1//*(zero)
+			gkbar2_hh3=dend_k2//*(zero)
+			vshift_hh3=-10
+			gl_hh3=0
+			ena=70
+			insert pas
+			g_pas=1/16000
+			e_pas=-70
+			insert cad
+			insert cah
+			//insert it
+			gbar_cah=cabar
+			//gbar_it=itbar
+		}
+	} //init active
+
+	proc calc(){  //the procedure for making new run
+		objref backvec   			//compares to the background activity
+        backvec=new Vector()
+	    countrun= downlimit     	//sim counter
+	    while (countrun<= uplimit){	//chnange in the number of synaptic inputs
+			TCsyn=int(countrun*TCratio)  //new number of synapses
+			CCsyn=int(countrun*CCratio)  //...
+			Isyn=int(countrun*Inhibratio)//...
+			if (TCsyn<1){TCsyn=1}        //range check
+			if (CCsyn<1){CCsyn=1}        //...
+			if (Isyn<1){Isyn=1}          //...
+			loclocation()
+			//recording of synaptic conductances
+            objref conTCAMPA[cell.tcsyn.count()],conTCNMDA[cell.tcsyn.count()],conCCAMPA[cell.ccsyn.count()],conCCNMDA[cell.ccsyn.count()],conIGABA1[cell.Isyn.count()],conIGABA2[cell.Isyn.count()]
+		    for j=0,cell.tcsyn.count()-1{           //tc connections
+    		    conTCAMPA[j]=new Vector()
+    		    conTCNMDA[j]=new Vector()
+			    conTCAMPA[j].record(&cell.tcsyn.object(j).gampa)
+			    conTCNMDA[j].record(&cell.tcsyn.object(j).gnmda)
+            }
+		    for j=0,cell.ccsyn.count()-1{           //cc connections
+    		    conCCAMPA[j]=new Vector()
+    		    conCCNMDA[j]=new Vector()
+			    conCCAMPA[j].record(&cell.ccsyn.object(j).gampa)
+			    conCCNMDA[j].record(&cell.ccsyn.object(j).gnmda)
+            }
+		    for j=0,cell.Isyn.count()-1{           //gaba connections
+    		    conIGABA1[j]=new Vector()
+			    conIGABA1[j].record(&cell.Isyn.object(j).D)
+    		    conIGABA2[j]=new Vector()
+			    conIGABA2[j].record(&cell.Isyn.object(j).R)
+            }  //end recording conductances
+
+			for runcount=1,1{//# repeats , first run in each repeat is control, second run is just the background activity
+                stdinit()       //control
+        		run()
+		       	for j=1,cell.tcsyn.count()-1{
+    		      conTCAMPA[0].add(conTCAMPA[j])
+    		      conTCNMDA[0].add(conTCNMDA[j])
+                }
+		       	for j=1,cell.ccsyn.count()-1{
+    		      conCCAMPA[0].add(conCCAMPA[j])
+    		      conCCNMDA[0].add(conCCNMDA[j])
+                }
+
+		       	for j=1,cell.Isyn.count()-1{
+    		      conIGABA1[0].add(conIGABA1[j])
+					conIGABA1[0].sub(conIGABA2[j])
+            	}
+       		    backvec=savevec.c
+				for tccount=0,int((TCsyn-1)/tcsynpercell){
+					tcnetstim[tccount].start=1000
+				}
+				for count=0,int((CCsyn-1)/ccsynpercell){
+					ccnetstim[count].start=1000
+				}
+				for count=0,int((Isyn-1)/Isynpercell){
+					Inetstim[count].start=1000
+				}
+				//****saving conductance vectors can be done from here, for example:
+					print conCCAMPA[0].max()  //optional print of peak amplitude, can print to a file
+					
+				 //background run 
+                stdinit()
+        		run()
+				print backvec.sub(savevec).max()  //optional print of peak amplitude, can print to a file
+			}
+			countrun=countrun+countlimit  //goes over synaptic numbers
+		}
+	}  //end calc run
+	load_file("l4ss.ses")
+
+	xpanel("Params")
+	  xlabel("Axon")             					//default-no active conductances
+	  xvalue("Na","axon_na",1,"init_active()")
+	  xvalue("K1","axon_k1",1,"init_active()")
+	  xvalue("K2","axon_k2",1,"init_active()")
+	  xlabel("Soma")                                //AP generation site
+	  xvalue("Na","soma_na",1,"init_active()")
+	  xvalue("K1","soma_k1",1,"init_active()")
+	  xvalue("K2","soma_k2",1,"init_active()")
+	  xlabel("Dends")
+	  xvalue("Na","dend_na",1,"init_active()")
+	  xvalue("K1","dend_k1",1,"init_active()")
+	  xvalue("K2","dend_k2",1,"init_active()")
+	  xlabel("All")
+	  xvalue("CaL","cabar",1,"init_active()")
+	  //xvalue("CaT","itbar",1,"init_active()")
+	  xlabel("Iterations")
+	  xvalue("% Seg","percentseg",1,"loclocation()")//location of synaptic inputs (0-random)
+	  xvalue("DownLimit","downlimit",1,"")          //top number of presynaptic TC cells
+	  xvalue("UPLimit","uplimit",1,"")              //bottom...
+	  xvalue("CountLimit","countlimit",1,"")        //counter...
+	  xvalue("TC Ratio","TCratio",1,"")             //TC to TC (can differ from 1 for preffered vs. non preferred cases
+	  xvalue("CC Ratio","CCratio",1,"")             //eCC to TC ratio
+	  xvalue("Inhib Ratio","Inhibratio",1,"")       //iCC to TC ratio
+	  xbutton("Calc","calc()")                      //runs the simulation
+	  xbutton("New Loc","loclocation() ")           //new distribution of synapses
+	xpanel()
+
+	xpanel("Synapses")
+	  xlabel("Thalamic Synapses")
+	  xvalue("Delay","tcdel",1,"c_gmax(2)")
+	  xvalue("AMPA Amp","gampamaxtc",1,"c_gmax(2)")
+	  xvalue("NMDA Amp","gnmdamaxtc",1,"c_gmax(2)")
+	 // xvalue("AMPA Decay","decayampatc",1,"c_gmax(2)")
+	 // xvalue("NMDA Decay","decaynmdatc",1,"c_gmax(2)")
+	  xvalue("Tspike","tcTspike",1,"c_gmax(2)")
+	  xvalue("Nspike","tcNspike",1,"c_gmax(2)")
+	  xvalue("Nnoise","tcnoise",1,"c_gmax(2)")
+	  xvalue("Syn #","TCsyn",1,"loclocation()")
+
+	  xlabel("CC Synapses")
+	  xvalue("Delay","ccdel",1,"c_gmax(2)")
+	  xvalue("AMPA Amp","gampamaxcc",1,"c_gmax(2)")
+	  xvalue("NMDA Amp","gnmdamaxcc",1,"c_gmax(2)")
+	  //xvalue("AMPA Decay","decayampacc",1,"c_gmax(2)")
+	  //xvalue("NMDA Decay","decaynmdacc",1,"c_gmax(2)")
+	  xvalue("Tspike","ccTspike",1,"c_gmax(2)")
+	  xvalue("Nspike","ccNspike",1,"c_gmax(2)")
+	  xvalue("Nnoise","ccnoise",1,"c_gmax(2)")
+	  xvalue("Syn #","CCsyn",1,"loclocation()")
+
+      xlabel("Inhibitory Synapses")
+	  xvalue("Delay","Idel",1,"c_gmax(2)")
+	  xvalue("GABAA Amp","ggabamax",1,"c_gmax(2)")
+	  xvalue("Tspike","ITspike",1,"c_gmax(2)")
+	  xvalue("Nspike","INspike",1,"c_gmax(2)")
+	  xvalue("Nnoise","Inoise",1,"c_gmax(2)")
+	  xvalue("Syn #","Isyn",1,"loclocation()")
+
+      xlabel("Random Synapses")
+	  xvalue("E#","randEnum",1,"loclocation()")
+	  xvalue("I#","randInum",1,"loclocation()")
+	  xvalue("AMPA Amp","randAMPAmax",1,"c_gmax(2)")
+	  xvalue("NMDA Amp","randNMDAmax",1,"c_gmax(2)")
+	  xvalue("GABA Amp","randGABAmax",1,"c_gmax(2)")
+	xpanel()
+		   //GUI
+	objref shape
+	shape=new Shape(0)
+	shape.view(-200, -200, 400, 400, 900, 200, 300.48, 300.32)
+	shape.show(0)
+	proc make_shape_plot(){//DRAWS THE POINTS ON THE CELL
+		shape.point_mark_remove()
+		for j=0,cell.tcsyn.count()-1{
+			shape.point_mark(cell.tcsyn.object(j), 3, 4, 5)
+		}
+		for j=0,cell.ccsyn.count()-1{
+			shape.point_mark(cell.ccsyn.object(j), 2, 4, 5)
+		}
+		for j=0,cell.Isyn.count()-1{
+			shape.point_mark(cell.Isyn.object(j), 4, 4, 5)
+		}
+		for j=0,randElist.count()-1{
+			shape.point_mark(randElist.object(j), 2, 2, 4)
+		}
+		for j=0,randIlist.count()-1{
+			shape.point_mark(randIlist.object(j), 4, 2, 4)
+		}
+	}//END SHAPE
+	//end GUI
+
+	proc loclocation(){    //automatic placement of synapses
+		objref tcnetstim[int(TCsyn/tcsynpercell)+1],ccnetstim[int(CCsyn/ccsynpercell)+1], Inetstim[int(Isyn/Isynpercell)+1]
+		objref tcinputvectimes[int(TCsyn/tcsynpercell)+1],ccinputvectimes[int(CCsyn/ccsynpercell)+1],Iinputvectimes[int(Isyn/Isynpercell)+1]
+		objref  randElist,randIlist,rrandsyn
+		objref temp,temp2
+		length=0
+		forsec cell.all{length=length+L}
+	 	rall.uniform(10, length-10)
+		length=0
+		forsec cell.segdends{length=length+L}
+	 	rseg.uniform(10, length-10)
+		length=0
+
+		rbgnormal.normal(1000,100)
+ 		cell.tcsyn=new List()
+		cell.tcnetcon=new List()
+		cell.ccsyn=new List()
+		cell.ccnetcon=new List()
+		cell.Isyn=new List()
+		cell.Inetcon=new List()
+		randElist=new List()
+		randIlist=new List()
+		rrandsyn=new Random()
+		rrandsyn.uniform(0,100)
+		//background synapses
+ 		for count=0,randEnum-1{
+			length=0
+			dendcount=0
+			newloc=rall.repick()
+			forsec cell.dends{
+				dendcount=dendcount+1
+				if( (length<=newloc)&&(length+L>=newloc)){		//put synapse
+					temp=new glutamate_old((newloc-length)/L)
+					temp.Tspike=100
+					temp.Nspike=5
+					temp.del= rrandsyn.repick()
+					randElist.append(temp)
+				}
+				length=length+L
+			}
+ 		}
+ 		for count=0,randInum-1{
+			length=0
+			dendcount=0
+			forsec cell.dends{
+				dendcount=dendcount+1
+				newloc=rall.repick()
+				if( (length<=newloc)&&(length+L>=newloc)){		//put synapse
+					temp=new gaba((newloc-length)/L)
+					temp.e=-60
+					temp.Tspike=100
+					temp.Nspike=5
+					temp.del= rrandsyn.repick()
+					randIlist.append(temp)
+				}
+				length=length+L
+			}
+ 		}
+		//thalamocortical synapses
+		prenum=-1
+	
+	precounter=0
+		for count=0,TCsyn-1{
+			if (precounter==0){
+                prenum=prenum+1
+				tcnetstim[prenum]=new NetStim(.5)
+				tcinputvectimes[prenum]=new Vector()
+			}
+			precounter=precounter+1
+			if (precounter==tcsynpercell){
+                precounter=0
+			}
+			cell.dends =new SectionList()
+				//the whole tree is connected
+			newloc=rall.repick()
+			forsec cell.all{cell.dends.append()}
+			
+			length=0
+			dendcount=0
+			forsec cell.dends{
+				dendcount=dendcount+1
+				if( (length<=newloc)&&(length+L>=newloc)){		//put synapse
+					temp=new glutamate((newloc-length)/L)
+					temp.xloc=x3d(((newloc-length)/L)*(n3d()-1))
+					temp.yloc=y3d(((newloc-length)/L)*(n3d()-1))
+					temp.tag1=dendcount-1
+					temp.tag2=(newloc-length)/L
+					cell.tcsyn.append(temp)
+					temp2=new NetCon(tcnetstim[prenum],temp)
+					if (precounter==1){
+						temp2.record(tcinputvectimes[prenum])
+					}
+					cell.tcnetcon.append(temp2)
+				}
+				length=length+L
+			}
+		}
+       	//corticocortical synapses
+		prenum=-1
+		precounter=0
+		for count=0,CCsyn-1{
+			if (precounter==0){
+                prenum=prenum+1
+				ccnetstim[prenum]=new NetStim(.5)
+				ccinputvectimes[prenum]=new Vector()
+			}
+			precounter=precounter+1
+			if (precounter==ccsynpercell){
+                precounter=0
+			}
+			cell.dends =new SectionList()
+              					//the whole tree is connected
+			newloc=rall.repick()
+			forsec cell.all{cell.dends.append()}
+			
+			length=0
+			dendcount=0
+			forsec cell.dends{
+				dendcount=dendcount+1
+				if( (length<=newloc)&&(length+L>=newloc)){		//put synapse
+					temp=new glutamate((newloc-length)/L)
+					temp.xloc=x3d(((newloc-length)/L)*(n3d()-1))
+					temp.yloc=y3d(((newloc-length)/L)*(n3d()-1))
+					temp.tag1=dendcount-1
+					temp.tag2=(newloc-length)/L
+					cell.ccsyn.append(temp)
+					temp2=new NetCon(ccnetstim[prenum],temp)
+					if (precounter==1){
+						temp2.record(ccinputvectimes[prenum])
+					}
+					cell.ccnetcon.append(temp2)
+				}
+				length=length+L
+			}
+		}
+
+       	//inhibitory synapses
+		prenum=-1
+		precounter=0
+		for count=0,Isyn-1{
+			if (precounter==0){
+                prenum=prenum+1
+				Inetstim[prenum]=new NetStim(.5)
+				Iinputvectimes[prenum]=new Vector()
+			}
+			precounter=precounter+1
+			if (precounter==Isynpercell){
+                precounter=0
+			}
+			cell.dends =new SectionList()
+			//the whole tree is connected
+			newloc=rall.repick()
+			forsec cell.all{cell.dends.append()}
+			
+			length=0
+			dendcount=0
+			forsec cell.dends{
+				dendcount=dendcount+1
+				if( (length<=newloc)&&(length+L>=newloc)){		//put synapse
+					temp=new gaba_net((newloc-length)/L)
+					temp.xloc=x3d(((newloc-length)/L)*(n3d()-1))
+					temp.yloc=y3d(((newloc-length)/L)*(n3d()-1))
+					temp.tag1=dendcount-1
+					temp.tag2=(newloc-length)/L
+					cell.Isyn.append(temp)
+					temp2=new NetCon(Inetstim[prenum],temp)
+					if (precounter==1){
+						temp2.record(Iinputvectimes[prenum])
+					}
+					cell.Inetcon.append(temp2)
+				}
+				length=length+L
+			}
+		}
+		make_shape_plot()
+		c_gmax()
+	}//loclocation
+
+	proc c_gmax(){  //changes in synaptic conducatnces or activation parameters
+		//TC synapses
+		for tccount=0,int((TCsyn-1)/tcsynpercell){
+			tcnetstim[tccount].interval=tcTspike
+			tcnetstim[tccount].number=tcNspike
+			tcnetstim[tccount].start=tcdel
+			tcnetstim[tccount].noise=tcnoise
+		}
+		//CC synapses
+		for count=0,int((CCsyn-1)/ccsynpercell){
+			ccnetstim[count].interval=ccTspike
+			ccnetstim[count].number=ccNspike
+			ccnetstim[count].start=ccdel
+			ccnetstim[count].noise=ccnoise
+		}
+		//Inhib synapses
+		for count=0,int((Isyn-1)/Isynpercell){
+			Inetstim[count].interval=ITspike
+			Inetstim[count].number=INspike
+			Inetstim[count].start=Idel
+			Inetstim[count].noise=Inoise
+		}
+		for j=0,cell.tcsyn.count()-1{           //tc connections
+			cell.tcsyn.object(j).gampamax=rsyndist.lognormal(gampamaxtc,(gampamaxtc)^4)
+			cell.tcsyn.object(j).gnmdamax=rsyndist.lognormal(gnmdamaxtc,(gnmdamaxtc)^4)
+			cell.tcsyn.object(j).decaynmda=decaynmdatc
+			cell.tcsyn.object(j).decayampa=decayampatc
+			cell.tcsyn.object(j).Voff=nmdaoff
+			cell.tcsyn.object(j).Vset=nmdaVset
+		}
+
+ 		for j=0,cell.ccsyn.count()-1{			//cc connections
+			cell.ccsyn.object(j).gampamax=rsyndist.lognormal(gampamaxcc,(gampamaxcc)^4)
+			cell.ccsyn.object(j).gnmdamax=rsyndist.lognormal(gnmdamaxcc,(gnmdamaxcc)^4)
+			cell.ccsyn.object(j).decaynmda=decaynmdacc
+			cell.ccsyn.object(j).decayampa=decayampacc
+			cell.ccsyn.object(j).Voff=nmdaoff
+			cell.ccsyn.object(j).Vset=nmdaVset
+		}
+ 		for j=0,cell.Isyn.count()-1{			//Inhib connections
+			cell.Isyn.object(j).gmax=rsyndist.lognormal(ggabamax,(ggabamax)^4)
+		}
+		//background
+ 		for j=0,randElist.count()-1{			//E connections
+			randElist.object(j).gampamax=rsyndist.lognormal(randAMPAmax,(randAMPAmax)^4)
+			randElist.object(j).gnmdamax=rsyndist.lognormal(randNMDAmax,(randNMDAmax)^4)
+		}
+ 		for j=0,randIlist.count()-1{			//I connections
+			randIlist.object(j).gmax=rsyndist.lognormal(randGABAmax,(randGABAmax)^4)
+		}
+	}
+
+	init_active()
+	loclocation()
+	forall{
+		Ra=100//***//
+	}
